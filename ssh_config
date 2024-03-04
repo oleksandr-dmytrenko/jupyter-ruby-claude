@@ -1,0 +1,7 @@
+Host bitbucket.org
+	StrictHostKeyChecking no
+	IdentityFile ~/.ssh/stelladeploy_rsa
+
+Host gitlab.com
+	StrictHostKeyChecking no
+	IdentityFile ~/.ssh/stelladeploy_rsa
