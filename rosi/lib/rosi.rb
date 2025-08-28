@@ -1,3 +1,5 @@
+require_relative './iruby/kernel_patch'
+
 module Rosi
   extend self
 
