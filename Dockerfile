@@ -19,7 +19,7 @@ ENV QTCONSOLE_VERSION="5.5.1"
 
 # Ruby
 ENV RUBY_VERSION="3.3.4"
-ENV BUNDLER_VERSION="2.4.22"
+ENV BUNDLER_VERSION="2.5.15"
 ENV GEM_IRUBY_VERSION="0.7.4"
 ENV GEM_MYSQL2_VERSION="0.5.6"
 ENV GEM_SEQUEL_VERSION="5.78.0"
@@ -120,6 +120,64 @@ RUN gem install iruby -v $GEM_IRUBY_VERSION
 RUN gem install mysql2 -v $GEM_MYSQL2_VERSION
 RUN gem install sequel -v $GEM_SEQUEL_VERSION
 RUN iruby register --force
+ENV BUNDLE_GEMFILE=""
+
+# Fix IRuby kernel to work with poetry environment
+RUN poetry run iruby register --force
+
+# Create a proper working directory for IRuby
+WORKDIR /nori-jupyter
+RUN mkdir -p /nori-jupyter/.jupyter
+
+# Create a proper Ruby kernel configuration
+RUN echo '{' > /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' "argv": [' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "/root/.asdf/shims/iruby",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "kernel",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "{connection_file}"' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' ],' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' "display_name": "Ruby 3.3.4",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' "language": "ruby",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' "env": {' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "PATH": "/root/.cache/pypoetry/virtualenvs/nori-jupyter-GHB3VKFG-py3.12/bin:/root/.asdf/shims:/root/.asdf/installs/ruby/3.3.4/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "BUNDLE_GEMFILE": "",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "WORKING_DIR": "/nori-jupyter",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "GEM_HOME": "/root/.asdf/installs/ruby/3.3.4/lib/ruby/gems/3.3.0",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "GEM_PATH": "/root/.asdf/installs/ruby/3.3.4/lib/ruby/gems/3.3.0"' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' }' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '}' >> /root/.local/share/jupyter/kernels/ruby/kernel.json
+
+# Create a wrapper script for IRuby to handle bundler issues
+RUN echo '#!/bin/bash' > /usr/local/bin/iruby-wrapper && \
+    echo 'export BUNDLE_GEMFILE=""' >> /usr/local/bin/iruby-wrapper && \
+    echo 'export GEM_HOME="/root/.asdf/installs/ruby/3.3.4/lib/ruby/gems/3.3.0"' >> /usr/local/bin/iruby-wrapper && \
+    echo 'export GEM_PATH="/root/.asdf/installs/ruby/3.3.4/lib/ruby/gems/3.3.0"' >> /usr/local/bin/iruby-wrapper && \
+    echo 'cd /nori-jupyter' >> /usr/local/bin/iruby-wrapper && \
+    echo 'exec /root/.asdf/shims/iruby "$@"' >> /usr/local/bin/iruby-wrapper
+RUN chmod +x /usr/local/bin/iruby-wrapper
+
+# Copy custom IRuby kernel
+COPY iruby_kernel.py /usr/local/bin/iruby_kernel.py
+RUN chmod +x /usr/local/bin/iruby_kernel.py
+
+# Update kernel to use custom Python-based IRuby kernel
+RUN echo '{' > /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' "argv": [' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "python",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "/usr/local/bin/iruby_kernel.py",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "-f",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "{connection_file}"' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' ],' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' "display_name": "IRuby 3.3.4",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' "language": "ruby",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' "env": {' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "PATH": "/root/.cache/pypoetry/virtualenvs/nori-jupyter-GHB3VKFG-py3.12/bin:/root/.asdf/shims:/root/.asdf/installs/ruby/3.3.4/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "BUNDLE_GEMFILE": "",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "WORKING_DIR": "/nori-jupyter",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "GEM_HOME": "/root/.asdf/installs/ruby/3.3.4/lib/ruby/gems/3.3.0",' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '  "GEM_PATH": "/root/.asdf/installs/ruby/3.3.4/lib/ruby/gems/3.3.0"' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo ' }' >> /root/.local/share/jupyter/kernels/ruby/kernel.json && \
+    echo '}' >> /root/.local/share/jupyter/kernels/ruby/kernel.json
 
 # Setup rosi helpers gem
 COPY rosi $HOME/rosi
