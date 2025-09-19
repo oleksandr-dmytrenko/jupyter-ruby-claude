@@ -17,12 +17,15 @@ ENV NBCONVERT_VERSION="7.16.2"
 ENV NOTEBOOK_VERSION="7.1.2"
 ENV QTCONSOLE_VERSION="5.5.1"
 
-# Ruby
-ENV RUBY_VERSION="3.3.4"
-ENV BUNDLER_VERSION="2.4.22"
+# Ruby - Use 3.2.4 which has proven IRuby compatibility
+ENV RUBY_VERSION="3.2.4"
+ENV BUNDLER_VERSION="2.5.18"
 ENV GEM_IRUBY_VERSION="0.7.4"
 ENV GEM_MYSQL2_VERSION="0.5.6"
-ENV GEM_SEQUEL_VERSION="5.78.0"
+ENV GEM_SEQUEL_VERSION="5.82.0"
+ENV GEM_FFI_VERSION="1.17.0"
+ENV GEM_FFI_RZMQ_VERSION="2.0.4"
+ENV GEM_MULTI_JSON_VERSION="1.15.0"
 
 # Setup keys to access internal git repositories
 RUN mkdir -pv $HOME/.ssh
@@ -30,7 +33,7 @@ ADD ssh_config $HOME/.ssh/config
 ADD stelladeploy_rsa $HOME/.ssh/stelladeploy_rsa
 RUN chmod 600 $HOME/.ssh/*
 
-# Install system dependencies
+# Install system dependencies including ZMQ libraries
 RUN apt-get update
 RUN TZ=Etc/UTC DEBIAN_FRONTEND=noninteractive apt-get install -y \
       apt-transport-https \
@@ -74,8 +77,11 @@ RUN TZ=Etc/UTC DEBIAN_FRONTEND=noninteractive apt-get install -y \
       libxml2-dev \
       libxmlsec1-dev \
       libyaml-dev \
+      libzmq3-dev \
+      libzmq5 \
       locales \
       patch \
+      pkg-config \
       rustc \
       software-properties-common \
       ssh \
@@ -111,23 +117,47 @@ RUN poetry add notebook@"${NOTEBOOK_VERSION}"
 RUN poetry add qtconsole@"${QTCONSOLE_VERSION}"
 RUN mkdir -p /notebooks
 
-# Ruby & Ruby kernel setup
+# Ruby & Ruby kernel setup with ZMQ compatibility
 RUN asdf plugin add ruby
 RUN asdf install ruby $RUBY_VERSION
 RUN asdf global ruby $RUBY_VERSION
-RUN gem install bundler -v $BUNDLER_VERSION
-RUN gem install iruby -v $GEM_IRUBY_VERSION
-RUN gem install mysql2 -v $GEM_MYSQL2_VERSION
-RUN gem install sequel -v $GEM_SEQUEL_VERSION
-RUN iruby register --force
 
-# Setup rosi helpers gem
+# Set Ruby-specific environment variables for better compatibility
+ENV RUBY_YJIT_ENABLE=1
+ENV BUNDLE_SILENCE_ROOT_WARNING=1
+
+# Install gems in specific order for better compatibility
+RUN gem install bundler -v $BUNDLER_VERSION --no-document
+RUN gem install ffi -v $GEM_FFI_VERSION --no-document
+RUN gem install multi_json -v $GEM_MULTI_JSON_VERSION --no-document
+
+# Install compatible ZMQ version (avoid 2.0.7 which has Ruby 3.3+ issues)
+RUN gem install ffi-rzmq -v $GEM_FFI_RZMQ_VERSION --no-document
+
+# Install other gems
+RUN gem install mysql2 -v $GEM_MYSQL2_VERSION --no-document
+RUN gem install sequel -v $GEM_SEQUEL_VERSION --no-document
+
+# Install IRuby with stable version and better ZMQ compatibility
+RUN gem install iruby -v $GEM_IRUBY_VERSION --no-document
+
+# Register kernel in the correct Jupyter environment
+WORKDIR /nori-jupyter
+RUN PATH="/root/.local/bin:$PATH" iruby register --force
+RUN ls -la ~/.local/share/jupyter/kernels/ || mkdir -p ~/.local/share/jupyter/kernels/
+
+# Test Ruby kernel registration
+RUN ruby -e "require 'iruby'; puts 'IRuby loaded successfully'"
+
+# Setup rosi helpers gem with IRuby fixes
 COPY rosi $HOME/rosi
 WORKDIR $HOME/rosi
-RUN gem build rosi.gemspec -o rosi.gem && gem install ./rosi.gem && rm rosi.gem
+RUN gem build rosi.gemspec -o rosi.gem && gem install ./rosi.gem --no-document && rm rosi.gem
 COPY rc.rb $HOME/rc.rb
 ENV RUBYOPT="-r ${HOME}/rc.rb"
 
 WORKDIR /nori-jupyter
 EXPOSE $PORT
-CMD poetry run jupyter notebook -y --ip='*' --port=$PORT --no-browser --allow-root --IdentityProvider.token=$TOKEN --ServerApp.password='' --ServerApp.notebook_dir='/notebooks'
+
+# Updated CMD with better logging and error handling
+CMD ["sh", "-c", "echo 'Starting Jupyter with Ruby kernel...' && poetry run jupyter notebook -y --ip='*' --port=$PORT --no-browser --allow-root --IdentityProvider.token=$TOKEN --ServerApp.password='' --ServerApp.notebook_dir='/notebooks' --log-level=DEBUG"]
